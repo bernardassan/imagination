@@ -1,0 +1,19 @@
+.{
+    .name = .imagination,
+    .version = "0.0.0",
+    .fingerprint = 0x96876f66c0285e34, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.14.0",
+    .dependencies = .{
+        .zzz = .{
+            .url = "https://github.com/tardy-org/zzz/archive/18ec7f1129ce4d0573b7c67f011b4d05c7b195d4.tar.gz",
+            .hash = "zzz-0.3.0-4HoaJrBQAgCXB_66nre0nvYZmAXMxj__gS8sFjpR68Hs",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "LICENSE",
+        "README.md",
+    },
+}
