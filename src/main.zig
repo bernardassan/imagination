@@ -45,7 +45,11 @@ pub fn main() !void {
 
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
-    const arena_alloc = arena.allocator();
+
+    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{
+        .child_allocator = arena.allocator(),
+    };
+    const arena_alloc = thread_safe_arena.allocator();
 
     var t = try Tardy.init(arena_alloc, .{
         .threading = .auto,
@@ -61,8 +65,10 @@ pub fn main() !void {
     var socket = try Socket.init(.{ .tcp = .{ .host = host, .port = port } });
     // TODO: how to use async close
     defer socket.close_blocking();
+
+    const backlog = 4096;
     try socket.bind();
-    try socket.listen(4096);
+    try socket.listen(backlog);
 
     const EntryParams = struct {
         router: *const Router,
