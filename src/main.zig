@@ -33,7 +33,6 @@ pub fn main() !void {
         .thread_safe = true,
     }) = .init;
     const gpa, const is_debug = gpa: {
-        if (builtin.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
         break :gpa switch (builtin.mode) {
             .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
             .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
@@ -43,15 +42,11 @@ pub fn main() !void {
         _ = debug_allocator.deinit();
     };
 
-    var arena: std.heap.ArenaAllocator = .init(gpa);
+    var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
     defer arena.deinit();
+    const arena_alloc = arena.allocator();
 
-    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{
-        .child_allocator = arena.allocator(),
-    };
-    const arena_alloc = thread_safe_arena.allocator();
-
-    var t = try Tardy.init(arena_alloc, .{
+    var t = try Tardy.init(gpa, .{
         .threading = .auto,
     });
     defer t.deinit();
