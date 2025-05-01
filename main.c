@@ -2,7 +2,7 @@
 #include <stdlib.h>
 
 extern void checkLeaks();
-extern void free_aligned(void *, size_t);
+extern void aligned_free(void *, size_t);
 
 int main() {
   int *arr = malloc(100 * sizeof(int)); // Uses Zig-tracked allocator
@@ -24,7 +24,7 @@ int main() {
     return 1;
   }
   printf("Allocated 64-byte-aligned memory at %p\n", ptr);
-  free_aligned(ptr, alignment);
+  aligned_free(ptr, alignment);
 
   // Optional: Call Zig's cleanup (if linked)
   checkLeaks(); // Checks for leaks

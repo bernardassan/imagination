@@ -24,7 +24,8 @@ const allocator = ZigCAllocator.init(gpa.allocator());
 // https://gist.github.com/pfgithub/65c13d7dc889a4b2ba25131994be0d20
 // std.heap.c_allocator
 // https://gencmurat.com/en/posts/using-allocators-in-zig/
-//
+// https://embeddedartistry.com/blog/2017/02/22/generating-aligned-memory/
+// https://developer.ibm.com/articles/pa-dalign/
 
 const ZigCAllocator = struct {
     backing_allocator: std.mem.Allocator,
@@ -189,22 +190,6 @@ export fn malloc(size: usize) ?*anyopaque {
     return allocator.alloc(null, size);
 }
 
-export fn posix_mem_align(memptr: *?*anyopaque, alignment: usize, size: usize) u32 {
-    std.debug.print("posix_mem_align with alignment {} and size {}\n", .{ alignment, size });
-    return switch (alignment) {
-        inline 16, 32, 64 => |bytes| allocator.posixMemAlign(memptr, .fromByteUnits(bytes), size),
-        else => allocator.posixMemAlign(memptr, .fromByteUnits(max_align_t), size),
-    };
-}
-
-export fn aligned_alloc(alignment: usize, size: usize) ?*anyopaque {
-    std.debug.print("aligned_alloc with alignment {} and size {}\n", .{ alignment, size });
-    return switch (alignment) {
-        inline 16, 32, 64 => |bytes| allocator.alignedAlloc(.fromByteUnits(bytes), size),
-        else => allocator.alignedAlloc(.fromByteUnits(max_align_t), size),
-    };
-}
-
 export fn calloc(nmemb: usize, size: usize) ?*anyopaque {
     std.debug.print("calloc {} memb with size {}\n", .{ nmemb, size });
     const total_size = nmemb * size;
@@ -225,7 +210,23 @@ export fn free(ptr: ?*anyopaque) void {
     }
 }
 
-export fn free_aligned(
+export fn posix_mem_align(memptr: *?*anyopaque, alignment: usize, size: usize) u32 {
+    std.debug.print("posix_mem_align with alignment {} and size {}\n", .{ alignment, size });
+    return switch (alignment) {
+        inline 16, 32, 64 => |bytes| allocator.posixMemAlign(memptr, .fromByteUnits(bytes), size),
+        else => allocator.posixMemAlign(memptr, .fromByteUnits(max_align_t), size),
+    };
+}
+
+export fn aligned_alloc(alignment: usize, size: usize) ?*anyopaque {
+    std.debug.print("aligned_alloc with alignment {} and size {}\n", .{ alignment, size });
+    return switch (alignment) {
+        inline 16, 32, 64 => |bytes| allocator.alignedAlloc(.fromByteUnits(bytes), size),
+        else => allocator.alignedAlloc(.fromByteUnits(max_align_t), size),
+    };
+}
+
+export fn aligned_free(
     ptr: ?*anyopaque,
     alignment: usize,
 ) void {
