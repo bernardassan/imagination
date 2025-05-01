@@ -4,8 +4,9 @@ const MetaData = packed struct {
     raw: Raw,
     const Raw = usize;
 
-    const ALIGN_MASK: usize = (@as(usize, 1) << ALIGN_BITS) - 1;
+    // Supports up to 64-byte alignment (2^6)
     const ALIGN_BITS = 6;
+    const ALIGN_MASK: usize = (@as(usize, 1) << ALIGN_BITS) - 1;
     const SIZE_MASK: usize = ~(ALIGN_MASK);
 
     const max_alignment_supported = 64;
@@ -13,25 +14,25 @@ const MetaData = packed struct {
     const max_size = (1 << (@bitSizeOf(Raw) - ALIGN_BITS));
 
     /// Stores size and log2(alignment) together
-    pub fn pack(size: usize, alignment: usize) MetaData {
-        std.debug.assert(size < max_size);
-        std.debug.assert(alignment <= max_alignment_supported and alignment > 0);
-        const log_align: u6 = std.math.log2_int(usize, alignment); //@ctz(alignment)
+    pub fn init(msize: usize, malignment: usize) MetaData {
+        std.debug.assert(msize < max_size);
+        std.debug.assert(std.math.isPowerOfTwo(malignment) and malignment <= max_alignment_supported);
+        // equivalent to @ctz(alignment)
+        const log_align: u6 = std.math.log2_int(usize, malignment);
         return .{
-            .raw = (size << ALIGN_BITS) | log_align,
+            .raw = (msize << ALIGN_BITS) | log_align,
         };
     }
 
-    pub fn unpack(self: MetaData) struct {
-        size: usize,
-        alignment: usize,
-    } {
+    // Extract size (upper 58 bits)
+    pub fn size(self: MetaData) usize {
+        return self.raw >> ALIGN_BITS;
+    }
+
+    // Extract alignment (lower 6 bits as 2^N)
+    pub fn alignment(self: MetaData) usize {
         const log_align: u6 = @truncate(self.raw & ALIGN_MASK);
-        const size = self.raw >> ALIGN_BITS;
-        return .{
-            .size = size,
-            .alignment = @as(usize, 1) << log_align,
-        };
+        return @as(usize, 1) << log_align;
     }
 };
 
@@ -39,9 +40,8 @@ test "pack and unpack metadata" {
     const size: usize = (1 << 58) - 1; // 288230376151711743
     const alignment: usize = 64;
 
-    const meta = MetaData.pack(size, alignment);
-    const unpacked = meta.unpack();
+    const meta = MetaData.init(size, alignment);
 
-    try std.testing.expectEqual(size, unpacked.size);
-    try std.testing.expectEqual(alignment, unpacked.alignment);
+    try std.testing.expectEqual(size, meta.size());
+    try std.testing.expectEqual(alignment, meta.alignment());
 }
