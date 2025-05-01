@@ -192,9 +192,7 @@ export fn malloc(size: usize) ?*anyopaque {
 export fn posix_mem_align(memptr: *?*anyopaque, alignment: usize, size: usize) u32 {
     std.debug.print("posix_mem_align with alignment {} and size {}\n", .{ alignment, size });
     return switch (alignment) {
-        16 => allocator.posixMemAlign(memptr, .@"16", size),
-        32 => allocator.posixMemAlign(memptr, .@"32", size),
-        64 => allocator.posixMemAlign(memptr, .@"64", size),
+        inline 16, 32, 64 => |bytes| allocator.posixMemAlign(memptr, .fromByteUnits(bytes), size),
         else => allocator.posixMemAlign(memptr, .fromByteUnits(max_align_t), size),
     };
 }
@@ -202,9 +200,7 @@ export fn posix_mem_align(memptr: *?*anyopaque, alignment: usize, size: usize) u
 export fn aligned_alloc(alignment: usize, size: usize) ?*anyopaque {
     std.debug.print("aligned_alloc with alignment {} and size {}\n", .{ alignment, size });
     return switch (alignment) {
-        16 => allocator.alignedAlloc(.@"16", size),
-        32 => allocator.alignedAlloc(.@"32", size),
-        64 => allocator.alignedAlloc(.@"64", size),
+        inline 16, 32, 64 => |bytes| allocator.alignedAlloc(.fromByteUnits(bytes), size),
         else => allocator.alignedAlloc(.fromByteUnits(max_align_t), size),
     };
 }
@@ -236,9 +232,7 @@ export fn free_aligned(
     std.debug.print("free aligned {*}\n", .{ptr});
     if (ptr) |p| {
         switch (alignment) {
-            16 => allocator.freeAligned(p, .@"16"),
-            32 => allocator.freeAligned(p, .@"32"),
-            64 => allocator.freeAligned(p, .@"64"),
+            inline 16, 32, 64 => |bytes| allocator.freeAligned(p, .fromByteUnits(bytes)),
             else => allocator.freeAligned(p, .fromByteUnits(max_align_t)),
         }
     }
