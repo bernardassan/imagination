@@ -16,14 +16,15 @@ int main() {
   int *new_arr = realloc(arr, 200 * sizeof(int)); // Resize safely
   free(new_arr); // Correctly freed via Zig's allocator
 
-  // void *ptr;
-  // // Allocate 64B-aligned memory for AVX-512
-  // if (posix_memalign(&ptr, 64, 1024) != 0) {
-  //   perror("posix_memalign failed");
-  //   return 1;
-  // }
-  // printf("Allocated 64-byte-aligned memory at %p\n", ptr);
-  // free_aligned(ptr, 64);
+  void *ptr;
+  const auto alignment = 64;
+  // Allocate 64B-aligned memory for AVX-512
+  if (posix_memalign(&ptr, alignment, 1024) != 0) {
+    perror("posix_memalign failed");
+    return 1;
+  }
+  printf("Allocated 64-byte-aligned memory at %p\n", ptr);
+  free_aligned(ptr, alignment);
 
   // Optional: Call Zig's cleanup (if linked)
   checkLeaks(); // Checks for leaks

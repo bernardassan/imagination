@@ -15,8 +15,8 @@ var gpa: std.heap.DebugAllocator(.{
     .safety = true,
     .stack_trace_frames = 16,
     // SIGSEGV debugging
-    // .never_unmap = true,
-    // .retain_metadata = true,
+    .never_unmap = true,
+    .retain_metadata = true,
 }) = .init;
 const allocator = ZigCAllocator.init(gpa.allocator());
 
@@ -71,19 +71,9 @@ const ZigCAllocator = struct {
         const aligned_ptr = ptr: {
             if (alignment) |alignment_| {
                 break :ptr switch (alignment_) {
-                    .@"16" => self.backing_allocator.alignedAlloc(
+                    .@"16", .@"32", .@"64" => |alignment_value| self.backing_allocator.alignedAlloc(
                         u8,
-                        .fromByteUnits(16),
-                        full_size,
-                    ) catch return null,
-                    .@"32" => self.backing_allocator.alignedAlloc(
-                        u8,
-                        .fromByteUnits(32),
-                        full_size,
-                    ) catch return null,
-                    .@"64" => self.backing_allocator.alignedAlloc(
-                        u8,
-                        .fromByteUnits(64),
+                        alignment_value,
                         full_size,
                     ) catch return null,
                     else => unreachable,
@@ -107,34 +97,35 @@ const ZigCAllocator = struct {
         if (!std.math.isPowerOfTwo(alignment_bytes) or alignment_bytes % @sizeOf(*anyopaque) != 0) {
             return @intCast(@intFromEnum(std.posix.system.E.INVAL));
         }
+        memptr.* = self.alloc(alignment, size) orelse return @intCast(@intFromEnum(std.posix.system.E.NOMEM));
 
-        // + alignment - 1 padding for the worse case where returned alloc
-        // address is just 1 byte before the desired alignment boundary so we
-        // can shift the pointer forward to meet the alignment requirement
-        const max_padding = alignment_bytes - 1;
-        const total_size = @sizeOf(usize) + size + max_padding;
-        // Overallocate to account for alignment padding and store the original
-        // alloced()'ed pointer before the aligned address.
-        const unaligned_ptr = self.backing_allocator.alloc(u8, total_size) catch return @intCast(@intFromEnum(std.posix.system.E.NOMEM));
-        const unaligned_addr = @intFromPtr(unaligned_ptr.ptr);
-        // Calculate aligned address after metadata
-        const aligned_addr = std.mem.alignForward(usize, unaligned_addr + @sizeOf(usize), alignment_bytes);
+        // // + alignment - 1 padding for the worse case where returned alloc
+        // // address is just 1 byte before the desired alignment boundary so we
+        // // can shift the pointer forward to meet the alignment requirement
+        // const max_padding = alignment_bytes - 1;
+        // const total_size = @sizeOf(usize) + size + max_padding;
+        // // Overallocate to account for alignment padding and store the original
+        // // alloced()'ed pointer before the aligned address.
+        // const unaligned_ptr = self.backing_allocator.alloc(u8, total_size) catch return @intCast(@intFromEnum(std.posix.system.E.NOMEM));
+        // const unaligned_addr = @intFromPtr(unaligned_ptr.ptr);
+        // // Calculate aligned address after metadata
+        // const aligned_addr = std.mem.alignForward(usize, unaligned_addr + @sizeOf(usize), alignment_bytes);
 
-        std.debug.assert(aligned_addr >= unaligned_addr);
+        // std.debug.assert(aligned_addr >= unaligned_addr);
 
-        // distance from unaligned address to aligned address
-        const distance_to_aligned = (aligned_addr - unaligned_addr);
-        const aligned_ptr = unaligned_ptr.ptr + distance_to_aligned;
+        // // distance from unaligned address to aligned address
+        // const distance_to_aligned = (aligned_addr - unaligned_addr);
+        // const aligned_ptr = unaligned_ptr.ptr + distance_to_aligned;
 
-        const metadata_addr = aligned_addr - @sizeOf(MetaData);
-        std.debug.assert(metadata_addr >= unaligned_addr);
+        // const metadata_addr = aligned_addr - @sizeOf(MetaData);
+        // std.debug.assert(metadata_addr >= unaligned_addr);
 
-        // distance from meta data address to algined address
-        const distance_to_meta = metadata_addr - unaligned_addr;
-        const meta_ptr = unaligned_ptr.ptr + distance_to_meta;
-        addHeader(unaligned_addr, meta_ptr, total_size);
+        // // distance from meta data address to algined address
+        // const distance_to_meta = metadata_addr - unaligned_addr;
+        // const meta_ptr = unaligned_ptr.ptr + distance_to_meta;
+        // addHeader(unaligned_addr, meta_ptr, total_size);
 
-        memptr.* = @ptrCast(aligned_ptr);
+        // memptr.* = @ptrCast(aligned_ptr);
 
         return 0; // Success
     }
@@ -160,32 +151,21 @@ const ZigCAllocator = struct {
     }
 
     fn freeAligned(self: ZigCAllocator, ptr: ?*anyopaque, comptime alignment: std.mem.Alignment) void {
-        _ = alignment;
         if (ptr) |p| {
             const metadata = getHeader(p);
             const original_ptr = metadata.allocptr();
-            // const full_slice = slice: switch (alignment) {
-            //     .@"16" => {
-            //         const full_slice: []align(16) u8 = @alignCast(original_ptr[0..metadata.allocsize()]);
-            //         break :slice full_slice;
-            //     },
-            //     .@"32" => {
-            //         const full_slice: []align(32) u8 = @alignCast(original_ptr[0..metadata.allocsize()]);
-            //         break :slice full_slice;
-            //     },
-            //     .@"64" => {
-            //         const full_slice: []align(64) u8 = @alignCast(original_ptr[0..metadata.allocsize()]);
-            //         break :slice full_slice;
-            //     },
-            //     else => {
-            //         const full_slice: []align(max_align_t) u8 = @alignCast(original_ptr[0..metadata.allocsize()]);
-            //         break :slice full_slice;
-            //     },
-            // };
-            std.debug.print("Alignment of slice {}\n", .{@alignOf(@TypeOf(original_ptr))});
-            self.backing_allocator.free(@as([]align(64) u8, @alignCast(@as([*]u8, @ptrCast(ptr))[0..1024])));
+            const full_slice = slice: switch (alignment) {
+                .@"16", .@"32", .@"64" => |align_bytes| {
+                    const slice: []align(align_bytes.toByteUnits()) u8 = @alignCast(original_ptr[0..metadata.allocsize()]);
+                    break :slice slice;
+                },
+                else => {
+                    const slice: []align(max_align_t) u8 = @alignCast(original_ptr[0..metadata.allocsize()]);
+                    break :slice slice;
+                },
+            };
 
-            // self.backing_allocator.free(full_slice);
+            self.backing_allocator.free(full_slice);
         }
     }
 
