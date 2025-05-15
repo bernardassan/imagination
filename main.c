@@ -7,7 +7,7 @@ extern void aligned_free(void *, size_t);
 int main() {
   int *arr = malloc(100 * sizeof(int)); // Uses Zig-tracked allocator
   if (!arr) {
-    printf("Allocation failed!\n");
+    fprintf(stderr, "Allocation failed!\n");
     return 1;
   }
   arr[0] = 42;

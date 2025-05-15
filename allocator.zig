@@ -203,15 +203,8 @@ export fn realloc(ptr: ?*anyopaque, new_size: usize) ?*anyopaque {
     return allocator.realloc(ptr, new_size);
 }
 
-export fn free(ptr: ?*anyopaque) void {
-    std.debug.print("free {*}\n", .{ptr});
-    if (ptr) |p| {
-        allocator.free(p);
-    }
-}
-
-export fn posix_mem_align(memptr: *?*anyopaque, alignment: usize, size: usize) u32 {
-    std.debug.print("posix_mem_align with alignment {} and size {}\n", .{ alignment, size });
+export fn posix_memalign(memptr: *?*anyopaque, alignment: usize, size: usize) u32 {
+    std.debug.print("posix_memalign with alignment {} and size {}\n", .{ alignment, size });
     return switch (alignment) {
         inline 16, 32, 64 => |bytes| allocator.posixMemAlign(memptr, .fromByteUnits(bytes), size),
         else => allocator.posixMemAlign(memptr, .fromByteUnits(max_align_t), size),
@@ -239,9 +232,31 @@ export fn aligned_free(
     }
 }
 
+export fn free(ptr: ?*anyopaque) void {
+    std.debug.print("free {*}\n", .{ptr});
+    if (ptr) |p| {
+        allocator.free(p);
+    }
+}
+
+// https://jcarin.com/posts/memory-leak/
+// https://github.com/bminor/glibc/blob/06caf53adfae0c93062edd62f83eed16ab5cec0b/malloc/set-freeres.c#L123
+// Glibc doesn't free some resources that are used through out the lifetime of
+// the library as an optimization since these resources would eventually be
+// freed by the kernel but this leads to leaks reported by valgrind and Zig's
+// debug allocator so call this to cleanup if `checkLeaks` is called
+/// Free all glibc allocated resources.
+extern fn __libc_freeres() callconv(.C) void;
+
 export fn checkLeaks() void {
+    if (builtin.target.isGnuLibC()) {
+        __libc_freeres();
+    }
     switch (gpa.deinit()) {
-        .leak => std.debug.print("Leaks detected\n", .{}),
+        .leak => {
+            std.debug.print("Leaks detected\n", .{});
+            std.process.exit(7);
+        },
         .ok => std.debug.print("No leaks detected. Happy Programming\n", .{}),
     }
 }
