@@ -1,6 +1,8 @@
 const std = @import("std");
 const debug = std.debug;
 const builtin = @import("builtin");
+const option: std.Options = .{ .log_level = debug };
+const log = std.log.scoped(.czalloc);
 
 /// maximum (most strict) alignment requirement for any C scalar type on this target
 const max_align_t: u16 = builtin.target.cTypeAlignment(.longdouble);
@@ -47,9 +49,9 @@ const ZigCAllocator = struct {
         }
     };
 
-    const Size = enum(u58) {
+    const Size = enum(u61) {
         _,
-        // max size = 2^58 - 1
+        // max size = 2^61 - 1
         const max_size = 1 << @bitSizeOf(Size);
 
         fn init(size: usize) Size {
@@ -63,21 +65,21 @@ const ZigCAllocator = struct {
         }
     };
 
-    const Alignment = enum(u6) {
+    const Alignment = enum(u3) {
         _,
-        // Since we are storing log2(alignment) in a u6, the maximum
+        // Since we are storing log2(alignment) in a u3, the maximum
         // theoretical alignment value we can represent is determined by the
-        // maximum value a u6 can hold (.ie 63) therefore the
+        // maximum value a u3 can hold (.ie 8) therefore the
         // max_theoretical_alignment = (2^log2_alignment) - 1
-        // .ie max_theoretical_alignment = (2^63) - 1
-        /// Supports up to 64-byte alignment (2^6)
+        // .ie max_theoretical_alignment = (2^8) - 1
+        /// Supports up to 64-byte alignment
         const max_alignment_supported = 64;
 
         fn init(alloc_alignment: std.mem.Alignment) Alignment {
             const alignment = alloc_alignment.toByteUnits();
             debug.assert(alignment <= max_alignment_supported);
             // equivalent to @ctz(alignment)
-            const log_align: u6 = std.math.log2_int(usize, alignment);
+            const log_align = std.math.log2_int(usize, alignment);
 
             return @enumFromInt(log_align);
         }
@@ -91,26 +93,26 @@ const ZigCAllocator = struct {
     };
 
     // Pack alignment + total size into a single usize
-    const MetaData = packed struct(usize) {
-        alignment: Alignment, // 6 bits: max alignment (2^63)-1 byte (but only support 64-byte alignment)
-        total_size: Size, // 58 bits: 256PB max allocation
+    const Metadata = packed struct(usize) {
+        alignment: Alignment,
+        total_size: Size,
 
-        fn init(alloc_total_size: Size, alloc_alignment: std.mem.Alignment) MetaData {
+        fn init(alloc_total_size: Size, alloc_alignment: std.mem.Alignment) Metadata {
             return .{
                 .alignment = .init(alloc_alignment),
                 .total_size = .init(alloc_total_size.toUsize()),
             };
         }
 
-        fn allocptr(self: *const MetaData) [*]u8 {
+        fn allocPtr(self: *const Metadata) [*]u8 {
             return @ptrCast(@constCast(self));
         }
 
-        fn allocalign(self: *const MetaData) std.mem.Alignment {
+        fn allocAlign(self: *const Metadata) std.mem.Alignment {
             return self.alignment.toAlignment();
         }
 
-        fn allocsize(self: *const MetaData) usize {
+        fn allocSize(self: *const Metadata) usize {
             return self.total_size.toUsize();
         }
     };
@@ -119,19 +121,21 @@ const ZigCAllocator = struct {
         return .{ .backing_allocator = backing_allocator };
     }
 
-    inline fn addHeader(aligned_addr: Pointer, size: Size, alignment: std.mem.Alignment) void {
-        const header: *MetaData = @alignCast(@ptrCast(aligned_addr.toPtr()));
-        header.* = MetaData.init(size, alignment);
+    inline fn addMetadataAndReturnPtr(aligned_addr: Pointer, size: Size, alignment: std.mem.Alignment) ?*anyopaque {
+        const aligned_ptr = aligned_addr.toPtr();
+        const header: *Metadata = @alignCast(@ptrCast(aligned_ptr));
+        header.* = Metadata.init(size, alignment);
+        return @ptrCast(aligned_ptr + @sizeOf(Metadata));
     }
 
     // Helper to get header from user pointer
-    inline fn getHeader(ptr: *anyopaque) *const MetaData {
+    inline fn metadata(ptr: *anyopaque) *const Metadata {
         const bytes_ptr: [*]u8 = @ptrCast(ptr);
-        return @alignCast(@ptrCast(bytes_ptr - @sizeOf(MetaData)));
+        return @alignCast(@ptrCast(bytes_ptr - @sizeOf(Metadata)));
     }
 
     fn alloc(self: ZigCAllocator, comptime alignment: ?std.mem.Alignment, size: usize) ?*anyopaque {
-        const full_size = size + @sizeOf(MetaData);
+        const full_size = size + @sizeOf(Metadata);
         const aligned_ptr = ptr: {
             if (alignment) |alignment_| {
                 break :ptr switch (alignment_) {
@@ -146,8 +150,12 @@ const ZigCAllocator = struct {
                 break :ptr self.backing_allocator.alignedAlloc(u8, .fromByteUnits(max_align_t), full_size) catch return null;
             }
         };
-        addHeader(.init(aligned_ptr.ptr), .init(full_size), alignment orelse .fromByteUnits(max_align_t));
-        return @ptrCast(aligned_ptr.ptr + @sizeOf(MetaData));
+
+        return addMetadataAndReturnPtr(
+            .init(aligned_ptr.ptr),
+            .init(full_size),
+            alignment orelse .fromByteUnits(max_align_t),
+        );
     }
 
     fn posixMemAlign(self: ZigCAllocator, memptr: *?*anyopaque, comptime alignment: std.mem.Alignment, size: usize) u32 {
@@ -160,35 +168,8 @@ const ZigCAllocator = struct {
         if (!std.math.isPowerOfTwo(alignment_bytes) or alignment_bytes % @sizeOf(*anyopaque) != 0) {
             return @intCast(@intFromEnum(std.posix.system.E.INVAL));
         }
+
         memptr.* = self.alloc(alignment, size) orelse return @intCast(@intFromEnum(std.posix.system.E.NOMEM));
-
-        // // + alignment - 1 padding for the worse case where returned alloc
-        // // address is just 1 byte before the desired alignment boundary so we
-        // // can shift the pointer forward to meet the alignment requirement
-        // const max_padding = alignment_bytes - 1;
-        // const total_size = @sizeOf(usize) + size + max_padding;
-        // // Overallocate to account for alignment padding and store the original
-        // // alloced()'ed pointer before the aligned address.
-        // const unaligned_ptr = self.backing_allocator.alloc(u8, total_size) catch return @intCast(@intFromEnum(std.posix.system.E.NOMEM));
-        // const unaligned_addr = @intFromPtr(unaligned_ptr.ptr);
-        // // Calculate aligned address after metadata
-        // const aligned_addr = std.mem.alignForward(usize, unaligned_addr + @sizeOf(usize), alignment_bytes);
-
-        // debug.assert(aligned_addr >= unaligned_addr);
-
-        // // distance from unaligned address to aligned address
-        // const distance_to_aligned = (aligned_addr - unaligned_addr);
-        // const aligned_ptr = unaligned_ptr.ptr + distance_to_aligned;
-
-        // const metadata_addr = aligned_addr - @sizeOf(MetaData);
-        // debug.assert(metadata_addr >= unaligned_addr);
-
-        // // distance from meta data address to algined address
-        // const distance_to_meta = metadata_addr - unaligned_addr;
-        // const meta_ptr = unaligned_ptr.ptr + distance_to_meta;
-        // addHeader(unaligned_addr, meta_ptr, total_size);
-
-        // memptr.* = @ptrCast(aligned_ptr);
 
         return 0; // Success
     }
@@ -204,56 +185,50 @@ const ZigCAllocator = struct {
 
     fn free(self: ZigCAllocator, ptr: ?*anyopaque) void {
         if (ptr) |p| {
-            const metadata = getHeader(p);
+            const metadata_ = metadata(p);
+            const original_ptr = metadata_.allocPtr();
+            const alignment = metadata_.allocAlign();
 
-            const original_ptr = metadata.allocptr();
-            const full_slice: []align(max_align_t) u8 = @alignCast(original_ptr[0..metadata.allocsize()]);
-
-            self.backing_allocator.free(full_slice);
-        }
-    }
-
-    fn freeAligned(self: ZigCAllocator, ptr: ?*anyopaque, comptime alignment: std.mem.Alignment) void {
-        if (ptr) |p| {
-            const metadata = getHeader(p);
-            const original_ptr = metadata.allocptr();
-            const full_slice = slice: switch (alignment) {
-                .@"16", .@"32", .@"64" => |align_bytes| {
-                    const slice: []align(align_bytes.toByteUnits()) u8 = @alignCast(original_ptr[0..metadata.allocsize()]);
-                    break :slice slice;
+            // NOTE: breaking out of switch with `slice` changes alignment of
+            // `slice` to 16, figure out why
+            switch (alignment) {
+                inline .@"16", .@"32", .@"64" => |align_bytes| {
+                    const slice: []align(align_bytes.toByteUnits()) u8 = @alignCast(original_ptr[0..metadata_.allocSize()]);
+                    return self.backing_allocator.free(slice);
                 },
                 else => {
-                    const slice: []align(max_align_t) u8 = @alignCast(original_ptr[0..metadata.allocsize()]);
-                    break :slice slice;
+                    const slice: []align(max_align_t) u8 = @alignCast(original_ptr[0..metadata_.allocSize()]);
+                    return self.backing_allocator.free(slice);
                 },
-            };
-
-            self.backing_allocator.free(full_slice);
+            }
         }
     }
 
     fn realloc(self: ZigCAllocator, ptr: ?*anyopaque, new_size: usize) ?*anyopaque {
         if (ptr == null) return self.alloc(null, new_size);
-        const metadata = getHeader(ptr.?);
+        const metadata_ = metadata(ptr.?);
 
-        const full_old: []align(max_align_t) u8 = @alignCast(metadata.allocptr()[0..metadata.allocsize()]);
+        const full_old: []align(max_align_t) u8 = @alignCast(metadata_.allocPtr()[0..metadata_.allocSize()]);
 
-        const new_full_size = new_size + @sizeOf(MetaData);
+        const new_full_size = new_size + @sizeOf(Metadata);
         const full_new = self.backing_allocator.realloc(full_old, new_full_size) catch return null;
 
-        addHeader(.init(full_new.ptr), .init(new_full_size), .fromByteUnits(max_align_t));
-        return @ptrCast(full_new.ptr + @sizeOf(MetaData));
+        return addMetadataAndReturnPtr(
+            .init(full_new.ptr),
+            .init(new_full_size),
+            .fromByteUnits(max_align_t),
+        );
     }
 };
 
 // Export C-compatible allocator functions
 export fn malloc(size: usize) ?*anyopaque {
-    debug.print("malloc of size {}\n", .{size});
+    log.debug("malloc of size {}", .{size});
     return allocator.alloc(null, size);
 }
 
 export fn calloc(nmemb: usize, size: usize) ?*anyopaque {
-    debug.print("calloc {} memb with size {}\n", .{ nmemb, size });
+    log.debug("calloc {} memb with size {}", .{ nmemb, size });
     const total_size = nmemb * size;
     const mem = allocator.alloc(null, total_size);
     // Zero-initialize
@@ -261,41 +236,31 @@ export fn calloc(nmemb: usize, size: usize) ?*anyopaque {
     return mem;
 }
 
-export fn realloc(ptr: ?*anyopaque, new_size: usize) ?*anyopaque {
-    debug.print("realloc {*} with size {}\n", .{ ptr, new_size });
-    return allocator.realloc(ptr, new_size);
+export fn realloc(memptr: ?*anyopaque, new_size: usize) ?*anyopaque {
+    log.debug("realloc {*} with size {}", .{ memptr, new_size });
+    return allocator.realloc(memptr, new_size);
 }
 
 export fn posix_memalign(memptr: *?*anyopaque, alignment: usize, size: usize) u32 {
-    debug.print("posix_memalign with alignment {} and size {}\n", .{ alignment, size });
+    log.debug("posix_memalign with alignment {} and size {}", .{ alignment, size });
     return switch (alignment) {
-        inline 16, 32, 64 => |bytes| allocator.posixMemAlign(memptr, .fromByteUnits(bytes), size),
+        inline 16, 32, 64 => |alignment_bytes| allocator.posixMemAlign(memptr, .fromByteUnits(alignment_bytes), size),
         else => allocator.posixMemAlign(memptr, .fromByteUnits(max_align_t), size),
     };
 }
 
 export fn aligned_alloc(alignment: usize, size: usize) ?*anyopaque {
-    debug.print("aligned_alloc with alignment {} and size {}\n", .{ alignment, size });
+    log.debug("aligned_alloc with alignment {} and size {}", .{ alignment, size });
     return switch (alignment) {
-        inline 16, 32, 64 => |bytes| allocator.alignedAlloc(.fromByteUnits(bytes), size),
+        inline 16, 32, 64 => |alignment_bytes| allocator.alignedAlloc(.fromByteUnits(alignment_bytes), size),
         else => allocator.alignedAlloc(.fromByteUnits(max_align_t), size),
     };
 }
 
-export fn aligned_free(ptr: ?*anyopaque, alignment: usize) void {
-    debug.print("free aligned {*}\n", .{ptr});
-    if (ptr) |p| {
-        switch (alignment) {
-            inline 16, 32, 64 => |bytes| allocator.freeAligned(p, .fromByteUnits(bytes)),
-            else => allocator.freeAligned(p, .fromByteUnits(max_align_t)),
-        }
-    }
-}
-
-export fn free(ptr: ?*anyopaque) void {
-    debug.print("free {*}\n", .{ptr});
-    if (ptr) |p| {
-        allocator.free(p);
+export fn free(memptr: ?*anyopaque) void {
+    if (memptr) |ptr| {
+        log.debug("free {*}", .{ptr});
+        allocator.free(ptr);
     }
 }
 
@@ -310,14 +275,15 @@ extern "c" fn __libc_freeres() void;
 
 export fn checkLeaks() void {
     if (builtin.target.isGnuLibC()) {
+        log.debug("freeing all glibc global resources with __libc_freeres", .{});
         __libc_freeres();
     }
     switch (gpa.deinit()) {
         .leak => {
-            debug.print("Leaks detected\n", .{});
+            log.debug("Leaks detected", .{});
             std.process.exit(7);
         },
-        .ok => debug.print("No leaks detected. Happy Programming\n", .{}),
+        .ok => log.debug("No leaks detected. Happy Programming", .{}),
     }
 }
 
