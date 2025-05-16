@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const log = std.log.scoped(.@"examples/basic");
+const log = std.log.scoped(.imagination);
 
 const zzz = @import("zzz");
 const http = zzz.HTTP;
@@ -24,34 +24,74 @@ fn baseHandler(ctx: *const Context, _: void) !Respond {
     });
 }
 
+comptime {
+    if (builtin.target.ptrBitWidth() != 64) {
+        @compileError("Imagination requires a 64-bit system");
+    }
+    if (builtin.os.tag != .linux) {
+        @compileError("Imagination is currently tested only on Linux.\nPR for support to other Oses are welcome.");
+    }
+}
+
+/// 1GiB static buffer allocation
+var buffer: [1 << 30]u8 = undefined;
+var fixed_allocator: std.heap.FixedBufferAllocator = .init(&buffer);
+const fba = fixed_allocator.threadSafeAllocator();
+
+var debug_allocator: std.heap.DebugAllocator(.{
+    .safety = true,
+    .thread_safe = true,
+}) = .init;
+
+const _gpa = gpa: {
+    break :gpa switch (builtin.mode) {
+        .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
+        .ReleaseSmall => .{ fba, false },
+        .ReleaseFast => .{ std.heap.smp_allocator, false },
+    };
+};
+const gpa = _gpa.@"0";
+const is_debug = _gpa.@"1";
+
+// Export C-compatible allocator functions
+export fn malloc(size: usize) ?*anyopaque {
+    return gpa.alloc(size) catch return null;
+}
+
+export fn free(ptr: ?*anyopaque) void {
+    if (ptr) |p| gpa.free(p);
+}
+
+export fn realloc(ptr: ?*anyopaque, new_size: usize) ?*anyopaque {
+    if (ptr) |p| {
+        return gpa.realloc(p, new_size) catch return null;
+    } else {
+        return malloc(new_size);
+    }
+}
+
+export fn calloc(nmemb: usize, size: usize) ?*anyopaque {
+    const total_size = nmemb * size;
+    const mem = malloc(total_size) orelse return null;
+    @memset(mem, 0); // Zero-initialize
+    return mem;
+}
+
 pub fn main() !void {
+    @memset(buffer[0..], 0);
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var debug_allocator: std.heap.DebugAllocator(.{
-        .safety = true,
-        .thread_safe = true,
-    }) = .init;
-    const gpa, const is_debug = gpa: {
-        if (builtin.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
-        break :gpa switch (builtin.mode) {
-            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
-            .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
-        };
-    };
     defer if (is_debug) {
         _ = debug_allocator.deinit();
     };
+    defer fixed_allocator.reset();
 
-    var arena: std.heap.ArenaAllocator = .init(gpa);
+    var arena: std.heap.ArenaAllocator = .init(_gpa.@"0");
     defer arena.deinit();
+    const arena_alloc = arena.allocator();
 
-    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{
-        .child_allocator = arena.allocator(),
-    };
-    const arena_alloc = thread_safe_arena.allocator();
-
-    var t = try Tardy.init(arena_alloc, .{
+    var t = try Tardy.init(fba, .{
         .threading = .auto,
     });
     defer t.deinit();
