@@ -7,7 +7,12 @@ pub fn build(b: *std.Build) void {
     const zzz = b.dependency("zzz", .{
         .target = target,
         .optimize = optimize,
-    });
+    }).module("zzz");
+
+    const czalloc = b.dependency("czalloc", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("czalloc");
 
     const lib_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
@@ -21,7 +26,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe_mod.addImport("imagination", lib_mod);
-    exe_mod.addImport("zzz", zzz.module("zzz"));
+    exe_mod.addImport("zzz", zzz);
+    exe_mod.addImport("czalloc", czalloc);
 
     const lib = b.addLibrary(.{
         .linkage = .static,
@@ -33,6 +39,7 @@ pub fn build(b: *std.Build) void {
     const exe = b.addExecutable(.{
         .name = "imagination",
         .root_module = exe_mod,
+        .use_llvm = true,
     });
 
     b.installArtifact(exe);

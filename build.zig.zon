@@ -9,8 +9,8 @@
             .hash = "zzz-0.3.0-4HoaJuFSAgB3kZuiFVDMNvuwFW71wPq8dpo-2PLUPgdY",
         },
         .czalloc = .{
-            .url = "git+https://github.com/bernardassan/czalloc?ref=main#065cb518b692a124320364eb4ba3e6d535390c85",
-            .hash = "czalloc-0.1.0-QBCkDmFUAACBNShZE3UMG7OfKBmepeE7Ej98r4CBsNAa",
+            .url = "git+https://github.com/bernardassan/czalloc?ref=main#bb13be777804c4e55be3e005cae6cccc706d20e2",
+            .hash = "czalloc-0.1.0-QBCkDrtaAABb6q2XpbQ3rjyycW7JZZjedPtu2DdRYaUb",
         },
     },
     .paths = .{
