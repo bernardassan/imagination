@@ -1,12 +1,16 @@
 .{
     .name = .imagination,
-    .version = "0.0.0",
+    .version = "0.1.0",
     .fingerprint = 0x96876f66c0285e34, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.14.0",
+    .minimum_zig_version = "0.15.2",
     .dependencies = .{
         .zzz = .{
-            .url = "https://github.com/tardy-org/zzz/archive/18ec7f1129ce4d0573b7c67f011b4d05c7b195d4.tar.gz",
-            .hash = "zzz-0.3.0-4HoaJrBQAgCXB_66nre0nvYZmAXMxj__gS8sFjpR68Hs",
+            .url = "https://github.com/bernardassan/zzz/archive/refs/heads/zig-0.15.2.tar.gz",
+            .hash = "zzz-0.3.0-4HoaJuFSAgB3kZuiFVDMNvuwFW71wPq8dpo-2PLUPgdY",
+        },
+        .czalloc = .{
+            .url = "git+https://github.com/bernardassan/czalloc?ref=main#065cb518b692a124320364eb4ba3e6d535390c85",
+            .hash = "czalloc-0.1.0-QBCkDmFUAACBNShZE3UMG7OfKBmepeE7Ej98r4CBsNAa",
         },
     },
     .paths = .{
