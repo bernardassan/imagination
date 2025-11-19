@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const log = std.log.scoped(.imagination);
 
 const zzz = @import("zzz");
+const zvips = @import("zvips");
 const czalloc = @import("czalloc");
 const http = zzz.HTTP;
 
@@ -34,6 +35,9 @@ comptime {
 pub fn main() !void {
     const gpa = czalloc.gpa;
     defer gpa.deinit();
+
+    try zvips.init("imagination");
+    defer zvips.deinit();
 
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;

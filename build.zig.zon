@@ -12,6 +12,10 @@
             .url = "git+https://github.com/bernardassan/czalloc?ref=main#bb13be777804c4e55be3e005cae6cccc706d20e2",
             .hash = "czalloc-0.1.0-QBCkDrtaAABb6q2XpbQ3rjyycW7JZZjedPtu2DdRYaUb",
         },
+        .zvips = .{
+            .url = "git+https://github.com/bernardassan/zvips?ref=main#9fa4a986f5d620ba1b6a2e371468882b06e06e6a",
+            .hash = "zvips-0.1.0--Zh1OfVwSQDez1Os9zHtdr1rgVhkXYHE2OlBHx1GP5K_",
+        },
     },
     .paths = .{
         "build.zig",

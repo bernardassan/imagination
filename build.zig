@@ -14,34 +14,25 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }).module("czalloc");
 
-    const lib_mod = b.createModule(.{
-        .root_source_file = b.path("src/root.zig"),
+    const zvips = b.dependency("zvips", .{
         .target = target,
         .optimize = optimize,
-    });
+    }).module("zvips");
 
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    exe_mod.addImport("imagination", lib_mod);
     exe_mod.addImport("zzz", zzz);
     exe_mod.addImport("czalloc", czalloc);
-
-    const lib = b.addLibrary(.{
-        .linkage = .static,
-        .name = "imagination",
-        .root_module = lib_mod,
-    });
-    b.installArtifact(lib);
+    exe_mod.addImport("zvips", zvips);
 
     const exe = b.addExecutable(.{
         .name = "imagination",
         .root_module = exe_mod,
         .use_llvm = true,
     });
-
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -53,17 +44,11 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const lib_unit_tests = b.addTest(.{
-        .root_module = lib_mod,
-    });
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
-
     const exe_unit_tests = b.addTest(.{
         .root_module = exe_mod,
     });
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
 }
